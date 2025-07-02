@@ -2,42 +2,38 @@ import pandas as pd
 import requests
 import time
 import os
-from urllib.parse import urlparse # For parsing domains from full URLs
+from urllib.parse import urlparse 
 
-# --- Configuration ---
-# <--- IMPORTANT: Update these paths and column names to match your CSV exactly! --->
-INPUT_CSV_FILE = 'Companies_181876.csv' # Your input CSV file name (updated from your error message)
-OUTPUT_CSV_FILE = 'companies_with_domains_lusha_batch.csv' # The new file where results will be saved
 
-# Column names in your CSV:
-COMPANY_NAME_COLUMN = 'Organization - Name' # The column containing company names
-DOMAIN_COLUMN = 'Organization - Website (Lusha)' # The column where found domains will be stored (or existing ones are)
-CLIENT_COMPANY_ID_COLUMN = 'Organization - ID' # The column with your client's unique IDs
+INPUT_CSV_FILE = 'Companies_181876.csv' 
+OUTPUT_CSV_FILE = 'companies_with_domains_lusha_batch.csv' 
+
+# Column names in CSV:
+COMPANY_NAME_COLUMN = 'Organization - Name' 
+DOMAIN_COLUMN = 'Organization - Website (Lusha)' 
+CLIENT_COMPANY_ID_COLUMN = 'Organization - ID' 
 
 # --- Lusha API Configuration ---
-# Lusha API Key: Tries to get it from an environment variable first (recommended for security)
+
 LUSHA_API_KEY = os.getenv('LUSHA_API_KEY')
-# Lusha Batch Company Search/Enrichment URL (verified with your latest info)
 LUSHA_BATCH_ENRICHMENT_URL = 'https://api.lusha.com/bulk/company'
 
-# Fallback if environment variable not set (LESS SECURE, ONLY FOR QUICK TESTING!)
+# Fallback if environment variable not set or not found (LESS SECURE!)
 if LUSHA_API_KEY is None:
     print("WARNING: LUSHA_API_KEY environment variable not found.")
     print("For quick testing, you can uncomment and set it directly below (less secure):")
-    # LUSHA_API_KEY = "YOUR_ACTUAL_LUSHA_API_KEY_HERE" # <--- PASTE YOUR LUSHA API KEY HERE!
-    if LUSHA_API_KEY is None or LUSHA_API_KEY == "YOUR_ACTUAL_LUSHA_API_KEY_HERE":
+    
+    if LUSHA_API_KEY is None or LUSHA_API_KEY == "ACTUAL_LUSHA_API_KEY_HERE":
         print("CRITICAL ERROR: Lusha API key is not set. Please set it as an environment variable or uncomment and paste it.")
         exit()
 
 # --- Batching, Rate Limiting, and Retry Settings ---
-BATCH_SIZE = 50            # Number of companies to send in each API request (matches your test batch)
-# Initial delay; will likely be increased based on Lusha's actual limits or to avoid firewall
-REQUEST_DELAY_SECONDS = 2.0 # Increased delay due to persistent 403 errors
-MAX_RETRIES = 3             # Number of times to retry an API call if it fails (e.g., due to rate limit)
-RETRY_DELAY_SECONDS = 15    # How long to wait before retrying a batch (increased)
+BATCH_SIZE = 50            
+REQUEST_DELAY_SECONDS = 2.0 
+MAX_RETRIES = 3             
+RETRY_DELAY_SECONDS = 15    
 
 # --- Global Rate Limit Tracking Variables ---
-# These will be updated after each successful API call
 lusha_daily_limit = "N/A"
 lusha_daily_requests_left = "N/A"
 
@@ -55,7 +51,6 @@ except Exception as e:
     exit()
 
 # --- Step 2: Prepare the DataFrame ---
-# Verify required columns exist
 if COMPANY_NAME_COLUMN not in df.columns:
     print(f"Error: '{COMPANY_NAME_COLUMN}' column not found. Please check your CSV header.")
     print("Existing columns are:", df.columns.tolist())
@@ -66,15 +61,12 @@ if CLIENT_COMPANY_ID_COLUMN not in df.columns:
     print("Existing columns are:", df.columns.tolist())
     exit()
 
-# Add a new column for the domains, or ensure it exists
 if DOMAIN_COLUMN not in df.columns:
-    df[DOMAIN_COLUMN] = '' # Initialize with empty strings
+    df[DOMAIN_COLUMN] = '' 
     print(f"Added new column '{DOMAIN_COLUMN}' to store found domains.")
 else:
     print(f"Using existing column '{DOMAIN_COLUMN}' for domains.")
 
-# Fix for FutureWarning: Ensure the DOMAIN_COLUMN is treated as a string type
-# The .replace('nan', '') handles cases where existing empty cells (NaN) are converted to the string 'nan'
 df[DOMAIN_COLUMN] = df[DOMAIN_COLUMN].astype(str).replace('nan', '')
 
 
@@ -92,10 +84,10 @@ def get_domains_from_lusha_batch(companies_batch_data, api_key, url):
         dict: A dictionary mapping original pandas_index to found domain or an error string.
               Returns {"error": "ERROR_MESSAGE"} on critical failures.
     """
-    global lusha_daily_limit, lusha_daily_requests_left # Declare use of global variables
+    global lusha_daily_limit, lusha_daily_requests_left 
 
     headers = {
-        'api_key': api_key, # Corrected header based on your latest information
+        'api_key': api_key, 
         'Content-Type': 'application/json',
         'Accept': 'application/json'
     }
@@ -132,7 +124,7 @@ def get_domains_from_lusha_batch(companies_batch_data, api_key, url):
             # --- Extract and update rate limit headers ---
             lusha_daily_limit = response.headers.get('x-rate-limit-daily', lusha_daily_limit)
             lusha_daily_requests_left = response.headers.get('x-daily-requests-left', lusha_daily_requests_left)
-            # Convert to int if possible, otherwise keep as string/N/A
+            
             try:
                 lusha_daily_limit = int(lusha_daily_limit)
             except ValueError:
@@ -193,8 +185,7 @@ def get_domains_from_lusha_batch(companies_batch_data, api_key, url):
 
             else: # Catch any other non-success status codes, like 403
                 print(f"  > API error for batch: Status {response.status_code}, Response: {response.text}")
-                # You might want to handle 403 more specifically here to distinguish from other API errors
-                # For example, by checking if 'Lusha FireWall' is in response.text
+                
                 if "Lusha FireWall" in response.text:
                     print("  > Lusha FireWall blocked access. This is likely due to rate limits or account restrictions.")
                     return {"error": "LUSHA_FIREWALL_BLOCK"}
@@ -237,7 +228,6 @@ for index, row in df.iterrows():
         if "error" in batch_results:
             error_message = batch_results['error']
             print(f"  > Critical error encountered in batch: {error_message}. Stopping script.")
-            # For debugging, let's also print the current rate limit info here if it's an error.
             print(f"  > Current Lusha Daily Limit: {lusha_daily_limit}, Requests Left: {lusha_daily_requests_left}")
 
             for _, _, original_pandas_idx in companies_to_process_batch:
@@ -249,7 +239,6 @@ for index, row in df.iterrows():
             df.loc[original_pandas_index, DOMAIN_COLUMN] = domain_found
 
         companies_to_process_batch = []
-        # Pause after each batch request
         print(f"  > Pausing for {REQUEST_DELAY_SECONDS} seconds...")
         print(f"  > Current Lusha Daily Limit: {lusha_daily_limit}, Requests Left: {lusha_daily_requests_left}")
         time.sleep(REQUEST_DELAY_SECONDS)
